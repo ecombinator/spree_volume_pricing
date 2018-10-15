@@ -14,7 +14,7 @@ Spree::Variant.class_eval do
       Spree::VolumePrice.where(
         (table[:variant_id].eq(id)
           .or(table[:volume_price_model_id].in(volume_price_models.ids)))
-          .and(table[:role_id].eq(user.resolve_role.try(:id)))
+          .and(table[:role_id].eq(nil).or(table[:role_id].in(user.spree_roles.map(&:id))))
         )
         .order(position: :asc)
     else
@@ -29,7 +29,8 @@ Spree::Variant.class_eval do
 
   # calculates the price based on quantity
   def volume_price(quantity, user = nil)
-    compute_volume_price_quantities :volume_price, price, quantity, user
+    default_price = price_for(user)
+    compute_volume_price_quantities :volume_price, default_price, quantity, user
   end
 
   # return percent of earning
@@ -59,7 +60,7 @@ Spree::Variant.class_eval do
     else
       volume_prices.each do |volume_price|
         if volume_price.include?(quantity)
-          return send "compute_#{type}".to_sym, volume_price
+          return send "compute_#{type}".to_sym, volume_price, user
         end
       end
 
@@ -68,37 +69,42 @@ Spree::Variant.class_eval do
     end
   end
 
-  def compute_volume_price(volume_price)
+  def compute_volume_price(volume_price, user = nil)
     case volume_price.discount_type
     when 'price'
       return volume_price.amount
     when 'dollar'
-      return price - volume_price.amount
+      return price_for(user) - volume_price.amount
     when 'percent'
-      return price * (1 - volume_price.amount)
+      return price_for(user) * (1 - volume_price.amount)
     end
   end
 
-  def compute_volume_price_earning_percent(volume_price)
+  def compute_volume_price_earning_percent(volume_price, user = nil)
     case volume_price.discount_type
     when 'price'
-      diff = price - volume_price.amount
+      diff = price_for(user) - volume_price.amount
       return (diff * 100 / price).round
     when 'dollar'
-      return (volume_price.amount * 100 / price).round
+      return (volume_price.amount * 100 / price_for(user)).round
     when 'percent'
       return (volume_price.amount * 100).round
     end
   end
 
-  def compute_volume_price_earning_amount(volume_price)
+  def compute_volume_price_earning_amount(volume_price, user = nil)
+
     case volume_price.discount_type
     when 'price'
-      return price - volume_price.amount
+      return price_for(user) - volume_price.amount
     when 'dollar'
       return volume_price.amount
     when 'percent'
-      return price - (price * (1 - volume_price.amount))
+      return price_for(user) - (price_for(user) * (1 - volume_price.amount))
     end
+  end
+
+  def price_for(user = nil)
+    user&.wholesaler? ? wholesale_price_or_default : price
   end
 end
